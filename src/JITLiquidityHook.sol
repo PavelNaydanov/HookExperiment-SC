@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {Test, console} from "forge-std/Test.sol"; // TODO
+
 import {BaseHook} from "@openzeppelin/uniswap-hooks/src/base/BaseHook.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager, SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -11,6 +13,7 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/type
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {TickBitmap} from "@uniswap/v4-core/src/libraries/TickBitmap.sol";
 import {CurrencySettler} from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -99,11 +102,9 @@ contract JITLiquidityHook is BaseHook {
         (uint160 sqrtPriceX96, int24 currentTick,,) = poolManager.getSlot0(poolId);
 
         // Calculate tick range: [roundedTick, roundedTick + tickSpacing]
-        int24 tickLower = (currentTick / key.tickSpacing) * key.tickSpacing;
-        if (currentTick < 0 && currentTick % key.tickSpacing != 0) {
-            tickLower -= key.tickSpacing;
-        }
-        int24 tickUpper = tickLower + key.tickSpacing;
+        int24 tickSpacing = key.tickSpacing;
+        int24 tickLower = TickBitmap.compress(currentTick, tickSpacing) * tickSpacing;
+        int24 tickUpper = tickLower + tickSpacing;
 
         // Get balances held by hook
         uint256 balance0 = IERC20(Currency.unwrap(key.currency0)).balanceOf(address(this));
