@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {Test, console} from "forge-std/Test.sol"; // TODO
-
 import {BaseHook} from "@openzeppelin/uniswap-hooks/src/base/BaseHook.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager, SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -52,6 +50,7 @@ contract JITLiquidityHook is BaseHook {
         });
     }
 
+    // TODO: will be change on the vault
     function deposit(PoolKey memory key, uint256 amount0, uint256 amount1) external {
         if (amount0 > 0) {
             IERC20(Currency.unwrap(key.currency0)).transferFrom(msg.sender, address(this), amount0);
@@ -61,6 +60,7 @@ contract JITLiquidityHook is BaseHook {
         }
     }
 
+    // TODO: will be change on the vault
     function withdraw(PoolKey memory key, uint256 amount0, uint256 amount1) external {
         if (amount0 > 0) {
             IERC20(Currency.unwrap(key.currency0)).transfer(msg.sender, amount0);
@@ -70,6 +70,7 @@ contract JITLiquidityHook is BaseHook {
         }
     }
 
+    // TODO: remove
     function getActivePosition(PoolKey memory key) external view returns (ActivePosition memory) {
         return _activePositions[key.toId()];
     }
