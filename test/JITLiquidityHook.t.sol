@@ -41,7 +41,7 @@ contract JITLiquidityHookTest is BaseTest {
         address flags = address(
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG) ^ (0x4444 << 144)
         );
-        bytes memory constructorArgs = abi.encode(poolManager);
+        bytes memory constructorArgs = abi.encode(poolManager, int256(0));
         deployCodeTo("JITLiquidityHook.sol:JITLiquidityHook", constructorArgs, flags);
         hook = JITLiquidityHook(flags);
 
