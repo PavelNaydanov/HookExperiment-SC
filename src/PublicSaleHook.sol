@@ -39,9 +39,9 @@ contract PublicSaleHook is BaseHook {
     error RemoveLiquidityNotAllowed();
     error InvalidAssets();
 
-    modifier adjustUsdtInPool(PoolKey calldata key, BalanceDelta delta) {
+    modifier trackUsdtVolume(PoolKey calldata key, BalanceDelta delta) {
         if (!_isUsdtCapReached) {
-            _adjustUsdtInPool(key, delta);
+            _trackUsdtVolume(key, delta);
         }
 
         _;
@@ -73,7 +73,7 @@ contract PublicSaleHook is BaseHook {
             beforeAddLiquidity: false,
             afterAddLiquidity: true,
             beforeRemoveLiquidity: true,
-            afterRemoveLiquidity: true,
+            afterRemoveLiquidity: false,
             beforeSwap: true,
             afterSwap: true,
             beforeDonate: true,
@@ -146,7 +146,7 @@ contract PublicSaleHook is BaseHook {
         SwapParams calldata,
         BalanceDelta delta,
         bytes calldata
-    ) internal override adjustUsdtInPool(key, delta) returns (bytes4, int128) {
+    ) internal override trackUsdtVolume(key, delta) returns (bytes4, int128) {
         if (!_isUsdtCapReached && _usdtInPool >= _usdtCap) {
             _isUsdtCapReached = true;
         }
@@ -161,7 +161,7 @@ contract PublicSaleHook is BaseHook {
         BalanceDelta delta,
         BalanceDelta,
         bytes calldata
-    ) internal override adjustUsdtInPool(key, delta) returns (bytes4, BalanceDelta) {
+    ) internal override trackUsdtVolume(key, delta) returns (bytes4, BalanceDelta) {
         return (BaseHook.afterAddLiquidity.selector, delta);
     }
 
@@ -176,17 +176,6 @@ contract PublicSaleHook is BaseHook {
         }
 
         return BaseHook.beforeRemoveLiquidity.selector;
-    }
-
-    function _afterRemoveLiquidity(
-        address,
-        PoolKey calldata key,
-        ModifyLiquidityParams calldata,
-        BalanceDelta delta,
-        BalanceDelta,
-        bytes calldata
-    ) internal override adjustUsdtInPool(key, delta) returns (bytes4, BalanceDelta) {
-        return (BaseHook.afterRemoveLiquidity.selector, delta);
     }
 
     function _beforeDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
@@ -261,8 +250,7 @@ contract PublicSaleHook is BaseHook {
         }
     }
 
-    // TODO: rename adjust to account
-    function _adjustUsdtInPool(PoolKey calldata key, BalanceDelta delta) private {
+    function _trackUsdtVolume(PoolKey calldata key, BalanceDelta delta) private {
         bool usdtIsCurrency0 = key.currency0 == _usdtCurrency;
         int128 usdtDelta = usdtIsCurrency0 ? delta.amount0() : delta.amount1();
 
