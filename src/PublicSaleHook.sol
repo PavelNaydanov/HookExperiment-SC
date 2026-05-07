@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {IPoolManager} from '@uniswap/v4-core/src/interfaces/IPoolManager.sol';
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import {PoolKey} from '@uniswap/v4-core/src/types/PoolKey.sol';
-import {SwapParams, ModifyLiquidityParams} from '@uniswap/v4-core/src/types/PoolOperation.sol';
-import {BeforeSwapDelta, toBeforeSwapDelta} from '@uniswap/v4-core/src/types/BeforeSwapDelta.sol';
-import {BalanceDelta} from '@uniswap/v4-core/src/types/BalanceDelta.sol';
-import {Currency, CurrencyLibrary} from '@uniswap/v4-core/src/types/Currency.sol';
-import {SwapMath} from '@uniswap/v4-core/src/libraries/SwapMath.sol';
-import {PoolId, PoolIdLibrary} from '@uniswap/v4-core/src/types/PoolId.sol';
-import {StateLibrary} from '@uniswap/v4-core/src/libraries/StateLibrary.sol';
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {BeforeSwapDelta, toBeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
+import {SwapMath} from "@uniswap/v4-core/src/libraries/SwapMath.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
-import {CurrencySettler} from '@uniswap/v4-core/test/utils/CurrencySettler.sol';
+import {CurrencySettler} from "@uniswap/v4-core/test/utils/CurrencySettler.sol";
 
 import {BaseHook} from "@openzeppelin/uniswap-hooks/src/base/BaseHook.sol";
 
@@ -77,11 +77,7 @@ contract PublicSaleHook is BaseHook {
     /// @param meta         Address of the META token.
     /// @param usdtCap      Cumulative USDT amount (in token native units) required to end the sale phase.
     constructor(IPoolManager _poolManager, address usdt, address meta, uint256 usdtCap) BaseHook(_poolManager) {
-        if (
-            address(_poolManager) == address(0)
-            || meta == address(0)
-            || usdt == address(0)
-        ) {
+        if (address(_poolManager) == address(0) || meta == address(0) || usdt == address(0)) {
             revert ZeroAddress();
         }
 
@@ -143,9 +139,8 @@ contract PublicSaleHook is BaseHook {
     /// @dev Validates that the initializing pool uses exactly the META/USDT currency pair.
     ///      Reverts with `InvalidAssets` for any other pair.
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal view override returns (bytes4) {
-        bool isValidPair =
-            (key.currency0 == _usdtCurrency && key.currency1 == _metaCurrency) ||
-            (key.currency0 == _metaCurrency && key.currency1 == _usdtCurrency);
+        bool isValidPair = (key.currency0 == _usdtCurrency && key.currency1 == _metaCurrency)
+            || (key.currency0 == _metaCurrency && key.currency1 == _usdtCurrency);
 
         if (!isValidPair) {
             revert InvalidAssets();
@@ -158,12 +153,7 @@ contract PublicSaleHook is BaseHook {
     ///      and zero LP fees. Returns a `BeforeSwapDelta` that adjusts for any difference between
     ///      the AMM spot output and the fixed-rate output, settling or taking the surplus from this
     ///      hook's own balance. After the cap is reached, returns neutral deltas and does not interfere.
-    function _beforeSwap(
-        address,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        bytes calldata
-    )
+    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
         returns (bytes4 selector_, BeforeSwapDelta beforeSwapDelta_, uint24 swapFee_)
@@ -184,13 +174,12 @@ contract PublicSaleHook is BaseHook {
     /// @dev After each swap, checks whether the cumulative USDT cap has been reached and, if so,
     ///      permanently sets `_isUsdtCapReached` to disable public-sale logic going forward.
     ///      USDT volume accounting is delegated to the `trackUsdtVolume` modifier.
-    function _afterSwap(
-        address,
-        PoolKey calldata key,
-        SwapParams calldata,
-        BalanceDelta delta,
-        bytes calldata
-    ) internal override trackUsdtVolume(key, delta) returns (bytes4, int128) {
+    function _afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta delta, bytes calldata)
+        internal
+        override
+        trackUsdtVolume(key, delta)
+        returns (bytes4, int128)
+    {
         if (!_isUsdtCapReached && _usdtInPool >= _usdtCap) {
             _isUsdtCapReached = true;
         }
@@ -245,11 +234,15 @@ contract PublicSaleHook is BaseHook {
     ///      adjustment required to match the fixed rate.
     /// @return amountIn  Tokens the AMM would consume at the current spot price.
     /// @return amountOut Tokens the AMM would produce at the current spot price.
-    function _getAmounts(PoolKey memory key, SwapParams memory params) private view returns (uint256 amountIn, uint256 amountOut) {
+    function _getAmounts(PoolKey memory key, SwapParams memory params)
+        private
+        view
+        returns (uint256 amountIn, uint256 amountOut)
+    {
         PoolId poolId = key.toId();
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
 
-        (,amountIn, amountOut,) = SwapMath.computeSwapStep({
+        (, amountIn, amountOut,) = SwapMath.computeSwapStep({
             sqrtPriceCurrentX96: sqrtPriceX96,
             sqrtPriceTargetX96: params.sqrtPriceLimitX96,
             liquidity: poolManager.getLiquidity(poolId),
@@ -269,11 +262,15 @@ contract PublicSaleHook is BaseHook {
     ///      - oneForZero + exactOut: user receives USDT; hook burns excess META input above fixed rate.
     /// @return specifiedDelta   Hook's adjustment on the swap-specified side (always 0 — AMM handles it).
     /// @return unspecifiedDelta Hook's adjustment on the unspecified side to match the fixed rate.
-    function _getDeltas(PoolKey memory key, SwapParams memory params) private returns (int128 specifiedDelta, int128 unspecifiedDelta) {
+    function _getDeltas(PoolKey memory key, SwapParams memory params)
+        private
+        returns (int128 specifiedDelta, int128 unspecifiedDelta)
+    {
         (uint256 amountIn, uint256 amountOut) = _getAmounts(key, params);
 
         bool exactIn = params.amountSpecified < 0;
-        uint256 amountSpecifiedAbs = uint256(params.amountSpecified < 0 ? -params.amountSpecified : params.amountSpecified);
+        uint256 amountSpecifiedAbs =
+            uint256(params.amountSpecified < 0 ? -params.amountSpecified : params.amountSpecified);
 
         if (params.zeroForOne) {
             if (exactIn) {
@@ -302,8 +299,7 @@ contract PublicSaleHook is BaseHook {
 
                 specifiedDelta = 0;
                 unspecifiedDelta = int128(uint128(excess));
-            }
-            else {
+            } else {
                 uint256 metaAmount = amountSpecifiedAbs * META_PER_USDT / RATE_PRECISION;
                 uint256 excess = metaAmount > amountIn ? metaAmount - amountIn : 0;
 

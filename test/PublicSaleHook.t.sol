@@ -5,7 +5,7 @@ import {Test, console} from "forge-std/Test.sol";
 
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {Currency, CurrencyLibrary} from '@uniswap/v4-core/src/types/Currency.sol';
+import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
@@ -28,33 +28,20 @@ contract PublicSaleHookTest is Test, Deployers {
         meta = Currency.unwrap(currency1);
 
         uint160 flags = uint160(
-            Hooks.BEFORE_INITIALIZE_FLAG |
-            Hooks.AFTER_ADD_LIQUIDITY_FLAG |
-            Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG |
-            Hooks.BEFORE_SWAP_FLAG |
-            Hooks.AFTER_SWAP_FLAG |
-            Hooks.BEFORE_DONATE_FLAG |
-            Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
+            Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+                | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_DONATE_FLAG
+                | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
         );
 
-        deployCodeTo(
-            "PublicSaleHook.sol",
-            abi.encode(manager, usdt, meta, USDT_CAP),
-            address(flags)
-        );
+        deployCodeTo("PublicSaleHook.sol", abi.encode(manager, usdt, meta, USDT_CAP), address(flags));
 
         saleHook = PublicSaleHook(address(flags));
 
         MockERC20(meta).mint(address(saleHook), 1_000_000e18);
         MockERC20(usdt).mint(address(saleHook), 1_000_000e18);
 
-        (key,) = initPool(
-            Currency.wrap(usdt),
-            Currency.wrap(meta),
-            saleHook,
-            LPFeeLibrary.DYNAMIC_FEE_FLAG,
-            SQRT_PRICE_4_1
-        );
+        (key,) =
+            initPool(Currency.wrap(usdt), Currency.wrap(meta), saleHook, LPFeeLibrary.DYNAMIC_FEE_FLAG, SQRT_PRICE_4_1);
 
         int24 tickSpacing = key.tickSpacing;
         int24 tickLower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
@@ -63,10 +50,7 @@ contract PublicSaleHookTest is Test, Deployers {
         modifyLiquidityRouter.modifyLiquidity(
             key,
             ModifyLiquidityParams({
-                tickLower: tickLower,
-                tickUpper: tickUpper,
-                liquidityDelta: 1_000_000 ether,
-                salt: bytes32(0)
+                tickLower: tickLower, tickUpper: tickUpper, liquidityDelta: 1_000_000 ether, salt: bytes32(0)
             }),
             ZERO_BYTES
         );
@@ -165,7 +149,7 @@ contract PublicSaleHookTest is Test, Deployers {
         // Swap in META should still work
         swap(key, true, amountInUsdt, ZERO_BYTES);
 
-        uint256 metaInUserAfter= MockERC20(meta).balanceOf(address(this));
+        uint256 metaInUserAfter = MockERC20(meta).balanceOf(address(this));
 
         assertLt(metaInUserAfter - metaInUserBefore, desiredAmountOutMeta);
     }
