@@ -9,8 +9,7 @@ import {Currency, CurrencyLibrary} from '@uniswap/v4-core/src/types/Currency.sol
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
-
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
 import {PublicSaleHook} from "../src/PublicSaleHook.sol";
 
@@ -47,8 +46,8 @@ contract PublicSaleHookTest is Test, Deployers {
 
         saleHook = PublicSaleHook(address(flags));
 
-        IERC20(usdt).approve(address(saleHook), type(uint256).max);
-        IERC20(meta).approve(address(saleHook), type(uint256).max);
+        MockERC20(meta).mint(address(saleHook), 1_000_000e18);
+        MockERC20(usdt).mint(address(saleHook), 1_000_000e18);
 
         (key,) = initPool(
             Currency.wrap(usdt),
@@ -81,19 +80,94 @@ contract PublicSaleHookTest is Test, Deployers {
         assertEq(saleHook.getUsdtCap(), USDT_CAP);
     }
 
-    // Rate: 1 USDT = 1 META
+    // Rate: 1 USDT = 8 META
+    // exact input usdt
     function test_swap_exact_USDT_for_META() external {
-        int256 amountIn = -1e18; // exact input 1 USDT
+        int256 amountInUsdt = -1e18; // exact input 1 USDT
+        uint256 desiredAmountOutMeta = 8e18; // desired output 8 META
 
         uint256 usdtInPoolBefore = saleHook.getUsdtInPool();
-        uint256 metaInPoolBefore = IERC20(meta).balanceOf(address(this));
+        uint256 metaInUserBefore = MockERC20(meta).balanceOf(address(this));
 
-        swap(key, true, amountIn, ZERO_BYTES);
+        swap(key, true, amountInUsdt, ZERO_BYTES);
 
         uint256 usdtInPoolAfter = saleHook.getUsdtInPool();
-        uint256 metaInPoolAfter = IERC20(meta).balanceOf(address(this));
+        uint256 metaInUserAfter = MockERC20(meta).balanceOf(address(this));
 
-        assertEq(usdtInPoolAfter - usdtInPoolBefore, uint256(-amountIn));
-        assertEq(metaInPoolAfter - metaInPoolBefore, uint256(-amountIn));
+        assertEq(usdtInPoolAfter - usdtInPoolBefore, uint256(-amountInUsdt));
+        assertEq(metaInUserAfter - metaInUserBefore, desiredAmountOutMeta);
+    }
+
+    // Rate: 1 USDT = 8 META
+    // exact output meta
+    function test_swap_USDT_for_exact_META() external {
+        int256 amountOutMeta = 8e18; // exact output 8 META
+        uint256 desiredAmountInUsdt = 1e18; // desired input 1 USDT
+
+        uint256 usdtInUserBefore = MockERC20(usdt).balanceOf(address(this));
+        uint256 metaInPoolBefore = MockERC20(meta).balanceOf(address(this));
+
+        swap(key, true, amountOutMeta, ZERO_BYTES);
+
+        uint256 usdtInUserAfter = MockERC20(usdt).balanceOf(address(this));
+        uint256 metaInPoolAfter = MockERC20(meta).balanceOf(address(this));
+
+        assertEq(usdtInUserBefore - usdtInUserAfter, desiredAmountInUsdt);
+        assertEq(metaInPoolAfter - metaInPoolBefore, uint256(amountOutMeta));
+    }
+
+    // Rate: 1 USDT = 8 META
+    // exact input META
+    function test_swap_exact_META_for_USDT() external {
+        int256 amountInMeta = -8e18; // exact input 8 META
+        uint256 desiredAmountOutUsdt = 1e18; // desired output 1 USDT
+
+        uint256 usdtInUserBefore = MockERC20(usdt).balanceOf(address(this));
+        uint256 metaInUserBefore = MockERC20(meta).balanceOf(address(this));
+
+        swap(key, false, amountInMeta, ZERO_BYTES);
+
+        uint256 usdtInUserAfter = MockERC20(usdt).balanceOf(address(this));
+        uint256 metaInUserAfter = MockERC20(meta).balanceOf(address(this));
+
+        assertEq(usdtInUserAfter - usdtInUserBefore, desiredAmountOutUsdt);
+        assertEq(metaInUserBefore - metaInUserAfter, uint256(-amountInMeta));
+    }
+
+    // Rate: 1 USDT = 8 META
+    // exact input USDT
+    function test_swap_META_for_exact_USDT() external {
+        int256 amountOutUSDT = 1e18; // exact input 1 USDT
+        uint256 desiredAmountInMeta = 8e18; // desired output 8 USDT
+
+        uint256 usdtInUserBefore = MockERC20(usdt).balanceOf(address(this));
+        uint256 metaInUserBefore = MockERC20(meta).balanceOf(address(this));
+
+        swap(key, false, amountOutUSDT, ZERO_BYTES);
+
+        uint256 usdtInUserAfter = MockERC20(usdt).balanceOf(address(this));
+        uint256 metaInUserAfter = MockERC20(meta).balanceOf(address(this));
+
+        assertEq(usdtInUserAfter - usdtInUserBefore, uint256(amountOutUSDT));
+        assertEq(metaInUserBefore - metaInUserAfter, desiredAmountInMeta);
+    }
+
+    function test_swap_when_usdt_cap_reached() external {
+        // Swap in USDT until cap is reached
+        swap(key, true, -int256(USDT_CAP), ZERO_BYTES);
+
+        assertTrue(saleHook.isUsdtCapReached());
+
+        int256 amountInUsdt = -1e18; // exact input 1 USDT
+        uint256 desiredAmountOutMeta = 4e18; // desired output 4 META
+
+        uint256 metaInUserBefore = MockERC20(meta).balanceOf(address(this));
+
+        // Swap in META should still work
+        swap(key, true, amountInUsdt, ZERO_BYTES);
+
+        uint256 metaInUserAfter= MockERC20(meta).balanceOf(address(this));
+
+        assertLt(metaInUserAfter - metaInUserBefore, desiredAmountOutMeta);
     }
 }

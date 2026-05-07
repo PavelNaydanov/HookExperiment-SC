@@ -12,6 +12,7 @@ import {SwapMath} from '@uniswap/v4-core/src/libraries/SwapMath.sol';
 import {PoolId, PoolIdLibrary} from '@uniswap/v4-core/src/types/PoolId.sol';
 import {StateLibrary} from '@uniswap/v4-core/src/libraries/StateLibrary.sol';
 import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
+import {CurrencySettler} from '@uniswap/v4-core/test/utils/CurrencySettler.sol';
 
 import {BaseHook} from "@openzeppelin/uniswap-hooks/src/base/BaseHook.sol";
 
@@ -19,6 +20,10 @@ contract PublicSaleHook is BaseHook {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
+    using CurrencySettler for Currency;
+
+    uint256 public constant RATE_PRECISION = 1e18;
+    uint256 public constant META_PER_USDT = 8 * RATE_PRECISION; // 8 META per 1 USDT
 
     uint256 private immutable _usdtCap;
 
@@ -26,7 +31,6 @@ contract PublicSaleHook is BaseHook {
     Currency private _usdtCurrency;
 
     uint256 private _usdtInPool;
-
     bool private _isUsdtCapReached;
 
     error ZeroAddress();
@@ -97,6 +101,10 @@ contract PublicSaleHook is BaseHook {
         return _metaCurrency;
     }
 
+    function isUsdtCapReached() external view returns (bool) {
+        return _isUsdtCapReached;
+    }
+
     function _beforeInitialize(address, PoolKey calldata key, uint160) internal view override returns (bytes4) {
         bool isValidPair =
             (key.currency0 == _usdtCurrency && key.currency1 == _metaCurrency) ||
@@ -119,49 +127,11 @@ contract PublicSaleHook is BaseHook {
         override
         returns (bytes4 selector_, BeforeSwapDelta beforeSwapDelta_, uint24 swapFee_)
     {
-        // 0. Проверить, что количество USDT в пуле достигнуто было хотя бы однажды
-        // 1. Определить направление свапа (покупка или продажа токена)
-        // 2. Если покупка токена, то продать токен по фиксированной цене. при условии достижения в пуле определенного количества USDT отключить
-        // 3. Если продажа токена, то отдать токен по невыгодной цене (делить пополам от суммы покупки) при условии достижения в пуле определенного количества токена USDT отключить
-        // 4. Если достигнуто определенное количество токена USDT в пуле, то свап работает по стандартным правилам пула
         if (_isUsdtCapReached) {
             return (BaseHook.beforeSwap.selector, BeforeSwapDelta.wrap(0), 0);
         }
 
-        bool exactIn = params.amountSpecified < 0;
-        uint256 amountSpecifiedAbs = uint256(params.amountSpecified < 0 ? -params.amountSpecified : params.amountSpecified);
-
-        if (amountSpecifiedAbs == 0) {
-            return (BaseHook.beforeSwap.selector, BeforeSwapDelta.wrap(0), 0);
-        }
-
-        PoolId poolId = key.toId();
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
-
-        (, uint256 amountIn, uint256 amountOut, ) = SwapMath.computeSwapStep({
-            sqrtPriceCurrentX96: sqrtPriceX96,
-            sqrtPriceTargetX96: params.sqrtPriceLimitX96,
-            liquidity: poolManager.getLiquidity(poolId),
-            amountRemaining: params.amountSpecified,
-            feePips: 0
-        });
-
-        Currency specifiedCurrency = params.zeroForOne ? key.currency0 : key.currency1;
-        bool specifiedIsUsdt = specifiedCurrency == _usdtCurrency;
-
-        int128 specifiedDelta;
-        int128 unspecifiedDelta;
-
-        if (specifiedIsUsdt && exactIn) {
-            int128 excess = int128(uint128(amountOut)) - int128(uint128(amountSpecifiedAbs));
-
-            poolManager.take(key.currency1, address(this), uint128(excess));
-
-            specifiedDelta = 0;
-            unspecifiedDelta = excess;
-        } else {
-            // TODO: any cases...
-        }
+        (int128 specifiedDelta, int128 unspecifiedDelta) = _getDeltas(key, params);
 
         return (
             BaseHook.beforeSwap.selector,
@@ -230,6 +200,65 @@ contract PublicSaleHook is BaseHook {
         }
 
         return BaseHook.beforeDonate.selector;
+    }
+
+    function _getAmounts(PoolKey memory key, SwapParams memory params) private view returns (uint256 amountIn, uint256 amountOut) {
+        PoolId poolId = key.toId();
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+
+        (,amountIn, amountOut,) = SwapMath.computeSwapStep({
+            sqrtPriceCurrentX96: sqrtPriceX96,
+            sqrtPriceTargetX96: params.sqrtPriceLimitX96,
+            liquidity: poolManager.getLiquidity(poolId),
+            amountRemaining: params.amountSpecified,
+            feePips: 0
+        });
+    }
+
+    function _getDeltas(PoolKey memory key, SwapParams memory params) private returns (int128 specifiedDelta, int128 unspecifiedDelta) {
+        (uint256 amountIn, uint256 amountOut) = _getAmounts(key, params);
+
+        bool exactIn = params.amountSpecified < 0;
+        uint256 amountSpecifiedAbs = uint256(params.amountSpecified < 0 ? -params.amountSpecified : params.amountSpecified);
+
+        if (params.zeroForOne) {
+            if (exactIn) {
+                uint256 metaAmount = amountSpecifiedAbs * META_PER_USDT / RATE_PRECISION;
+                uint256 excess = metaAmount > amountOut ? metaAmount - amountOut : 0;
+
+                key.currency1.settle(poolManager, address(this), excess, false);
+
+                specifiedDelta = 0;
+                unspecifiedDelta = -int128(uint128(excess));
+            } else {
+                uint256 usdtAmount = amountSpecifiedAbs * RATE_PRECISION / META_PER_USDT;
+                uint256 excess = amountIn > usdtAmount ? amountIn - usdtAmount : 0;
+
+                key.currency0.settle(poolManager, address(this), excess, false);
+
+                specifiedDelta = 0;
+                unspecifiedDelta = -int128(uint128(excess));
+            }
+        } else {
+            if (exactIn) {
+                uint256 usdtAmount = amountSpecifiedAbs * RATE_PRECISION / META_PER_USDT;
+                uint256 excess = amountOut > usdtAmount ? amountOut - usdtAmount : 0;
+
+                poolManager.take(key.currency0, address(0), excess);
+
+                specifiedDelta = 0;
+                unspecifiedDelta = int128(uint128(excess));
+            }
+            else {
+                uint256 metaAmount = amountSpecifiedAbs * META_PER_USDT / RATE_PRECISION;
+                uint256 excess = metaAmount > amountIn ? metaAmount - amountIn : 0;
+
+                poolManager.take(key.currency1, address(0), excess);
+
+                specifiedDelta = 0;
+                unspecifiedDelta = int128(uint128(excess));
+            }
+        }
     }
 
     // TODO: rename adjust to account
