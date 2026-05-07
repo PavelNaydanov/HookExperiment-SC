@@ -10,13 +10,15 @@ import {BalanceDelta} from '@uniswap/v4-core/src/types/BalanceDelta.sol';
 import {Currency, CurrencyLibrary} from '@uniswap/v4-core/src/types/Currency.sol';
 import {SwapMath} from '@uniswap/v4-core/src/libraries/SwapMath.sol';
 import {PoolId, PoolIdLibrary} from '@uniswap/v4-core/src/types/PoolId.sol';
+import {StateLibrary} from '@uniswap/v4-core/src/libraries/StateLibrary.sol';
+import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 
 import {BaseHook} from "@openzeppelin/uniswap-hooks/src/base/BaseHook.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract PublicSaleHook is BaseHook {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
     uint256 private immutable _usdtCap;
 
@@ -114,7 +116,6 @@ contract PublicSaleHook is BaseHook {
         bytes calldata
     )
         internal
-        view
         override
         returns (bytes4 selector_, BeforeSwapDelta beforeSwapDelta_, uint24 swapFee_)
     {
@@ -127,66 +128,46 @@ contract PublicSaleHook is BaseHook {
             return (BaseHook.beforeSwap.selector, BeforeSwapDelta.wrap(0), 0);
         }
 
-        Currency specifiedCurrency = params.zeroForOne ? key.currency0 : key.currency1;
-        bool specifiedIsUsdt = specifiedCurrency == _usdtCurrency;
         bool exactIn = params.amountSpecified < 0;
-
-        uint128 amountSpecifiedAbs = uint128(
-            params.amountSpecified > 0
-                ? uint256(params.amountSpecified)
-                : uint256(-params.amountSpecified)
-        );
+        uint256 amountSpecifiedAbs = uint256(params.amountSpecified < 0 ? -params.amountSpecified : params.amountSpecified);
 
         if (amountSpecifiedAbs == 0) {
             return (BaseHook.beforeSwap.selector, BeforeSwapDelta.wrap(0), 0);
         }
 
+        PoolId poolId = key.toId();
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+
+        (, uint256 amountIn, uint256 amountOut, ) = SwapMath.computeSwapStep({
+            sqrtPriceCurrentX96: sqrtPriceX96,
+            sqrtPriceTargetX96: params.sqrtPriceLimitX96,
+            liquidity: poolManager.getLiquidity(poolId),
+            amountRemaining: params.amountSpecified,
+            feePips: 0
+        });
+
+        Currency specifiedCurrency = params.zeroForOne ? key.currency0 : key.currency1;
+        bool specifiedIsUsdt = specifiedCurrency == _usdtCurrency;
+
         int128 specifiedDelta;
         int128 unspecifiedDelta;
 
-        if (specifiedIsUsdt) {
-            // USDT specified:
-            // 1 USDT -> 1 META
-            // exact in: user pays USDT, receives META
-            // exact out: user wants META, pays USDT
-            if (exactIn) {
-                uint256 metaOut = amountSpecifiedAbs;
-                specifiedDelta = -int128(uint128(amountSpecifiedAbs));
-                unspecifiedDelta = int128(uint128(metaOut));
-            } else {
-                uint256 usdtIn = amountSpecifiedAbs;
-                specifiedDelta = int128(uint128(usdtIn));
-                unspecifiedDelta = -int128(uint128(amountSpecifiedAbs));
-            }
+        if (specifiedIsUsdt && exactIn) {
+            int128 excess = int128(uint128(amountOut)) - int128(uint128(amountSpecifiedAbs));
+
+            poolManager.take(key.currency1, address(this), uint128(excess));
+
+            specifiedDelta = 0;
+            unspecifiedDelta = excess;
         } else {
-            // META specified:
-            // 1 META -> 0.5 USDT
-            // exact in: user pays META, receives USDT
-            // exact out: user wants USDT, pays META
-            if (exactIn) {
-                uint256 usdtOut = amountSpecifiedAbs / 2;
-                specifiedDelta = -int128(uint128(amountSpecifiedAbs));
-                unspecifiedDelta = int128(uint128(usdtOut));
-            } else {
-                uint256 metaIn = amountSpecifiedAbs * 2;
-                specifiedDelta = int128(uint128(metaIn));
-                unspecifiedDelta = -int128(uint128(amountSpecifiedAbs));
-            }
+            // TODO: any cases...
         }
 
-        if (params.zeroForOne) {
-            return (
-                BaseHook.beforeSwap.selector,
-                toBeforeSwapDelta(specifiedDelta, unspecifiedDelta),
-                0
-            );
-        } else {
-            return (
-                BaseHook.beforeSwap.selector,
-                toBeforeSwapDelta(unspecifiedDelta, specifiedDelta),
-                0
-            );
-        }
+        return (
+            BaseHook.beforeSwap.selector,
+            toBeforeSwapDelta(specifiedDelta, unspecifiedDelta),
+            0 | LPFeeLibrary.OVERRIDE_FEE_FLAG
+        );
     }
 
     function _afterSwap(
@@ -196,7 +177,7 @@ contract PublicSaleHook is BaseHook {
         BalanceDelta delta,
         bytes calldata
     ) internal override adjustUsdtInPool(key, delta) returns (bytes4, int128) {
-        if (_usdtInPool >= _usdtCap) {
+        if (!_isUsdtCapReached && _usdtInPool >= _usdtCap) {
             _isUsdtCapReached = true;
         }
 
@@ -251,6 +232,7 @@ contract PublicSaleHook is BaseHook {
         return BaseHook.beforeDonate.selector;
     }
 
+    // TODO: rename adjust to account
     function _adjustUsdtInPool(PoolKey calldata key, BalanceDelta delta) private {
         bool usdtIsCurrency0 = key.currency0 == _usdtCurrency;
         int128 usdtDelta = usdtIsCurrency0 ? delta.amount0() : delta.amount1();
